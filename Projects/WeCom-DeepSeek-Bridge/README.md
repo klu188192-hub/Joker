@@ -134,12 +134,15 @@ model:
 
 ### 5.5 项目上下文注入到 DeepSeek（让 Joker 能查项目进度）
 
-**两层 context** 合并进 DeepSeek system prompt：
+**三层 context** 合并进 DeepSeek system prompt：
 
 | 层 | 来源 | 更新方式 | 大小 |
 |---|---|---|---|
-| 静态 | `KK:C:/Tools/wecom-bridge/context.md` (从 Mac scp 同步) | 手动跑 `~/.claude/scripts/build_wecom_context.sh` 或 CC 会话开始时自动 | ~29KB / 588 行 |
-| 动态 | `bridge` 进程内 `RECENT_EVENTS` deque(30) | monitor 每 /push 一条自动入流（trade events + zone events）| 在内存 |
+| **实时报价** | `KK:C:/Tools/quote.json`（monitor_pois 每 15s tick → 写文件）| 自动 | ~150 字节 |
+| 静态背景 | `KK:C:/Tools/wecom-bridge/context.md` (从 Mac scp) | 手动 `~/.claude/scripts/build_wecom_context.sh` | ~29KB |
+| 动态事件 | `bridge` 进程内 `RECENT_EVENTS` deque(30) | monitor 每 /push 自动入流 | 内存 |
+
+**修复 67200 训练数据旧价 bug**（2026-05-03）：DeepSeek 训练截止于 2025 年中，记得 BTC 在 67200。在 system prompt 顶部加实时报价 + "权威来源 — 不要回答 67200 之类训练数据旧价"指引，DeepSeek 现在用 monitor 实时报价答。
 
 **build_system_prompt()** 在每次 DeepSeek 调用时实时拼：BASE_SYSTEM + 静态 context.md + 最近 30 条 monitor 事件流（按时间倒序）。
 

@@ -1,0 +1,1 @@
+# Joker 部署验证\n\n- 时间: 2026-05-03\n- Obsidian 1.12.7 跑在 Joker (Tailscale 100.74.158.58)\n- REST API 27123 已通\n- cli-anything-obsidian 写入成功

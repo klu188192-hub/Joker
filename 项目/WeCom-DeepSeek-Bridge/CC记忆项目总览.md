@@ -151,6 +151,86 @@ model:
 - 或 CC 会话启动时自动跑一次（如本会话开始时）
 - 或手动跑 `bash ~/.claude/scripts/build_wecom_context.sh`（耗时 < 1s）
 
+### 5.5.1 DeepSeek function calling 实时拉图（2026-05-04）
+
+bridge 加 `query_chart(symbol, timeframe, count)` 工具，注入 DeepSeek messages 的 `tools` 字段。DeepSeek 决定要查图时主动 tool_call → bridge 调本地 MetaTrader5 client（连 Star Bridge terminal）→ 返回 OHLC/EMA/tick → DeepSeek 多轮 loop 形成最终答复。
+
+`ask_deepseek` 改为多轮 loop（最多 4 轮 tool use，每轮上限 100 根 K）。bridge venv 装了 MetaTrader5 + pandas + numpy。
+
+支持 TF：M1 / M5 / M15 / M30 / H1 / H4 / D1 / W1。任意 Star Bridge 支持的 symbol。
+
+quote.json 同时扩到 10 symbol：BTCUSD / XAUUSD / ETHUSD / EURUSD / GBPUSD / USDJPY / AUDUSD / US30 / US500 / NAS100。每 15s 刷新。
+
+chart_snapshot.json：BTC + XAU 的 D1/H4/M15 最近 N 根 OHLC，每 60s 刷新（无需 DeepSeek 主动调用就能直接读）。
+
+**优势**：不需要 pre-write 大量数据；DeepSeek 按需查；上下文不爆。
+**代价**：单次问答多 1-3 次 DeepSeek API 调用 + 1-3 次 mt5 query（每次 ~200ms）。
+
+### 5.5.2 ⚠️ ObsidianVault symlink 失效（2026-05-04）
+
+`/Users/joker/ObsidianVault/` symlink 失效（可能 mac 重启），实际数据在 iCloud 路径：
+```
+/Users/joker/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault/
+```
+后续 `build_wecom_context.sh` 改用 iCloud 完整路径。**重建 symlink** 命令（用户授权后跑）：
+```bash
+ln -s "/Users/joker/Library/Mobile Documents/iCloud~md~obsidian/Documents/ObsidianVault" /Users/joker/ObsidianVault
+```
+
+### 5.5.4 v10 重写：白底 SMC 标注图 + auto detect OB/FVG（2026-05-04 PM）
+
+用户上传 5 张 @天才交易员阿华 样图后逆向。**之前 v8 的暗黑底完全错向，本次彻底重写**。
+
+**新 render_chart_image**（白底 SMC 风格）：
+- mplfinance `charles` style，白底，标准红绿 K 线，无 volume sub
+- FVG / IFVG：**粉色半透明矩形**（fc=#fdd9d9, alpha=0.55）+ 红边
+- OB：**浅蓝半透明矩形**（fc=#cfe2ff, alpha=0.50）+ 蓝边
+- 结构（CISD/TS/BRK/MSS/SMT/LTF）：黑色细线 + 简短英文标签
+- 流动性（BSL/SSL/DOL）：蓝/红细线 + 同色标签
+- **实时价格**：永远在右侧橙色 tag（取 mt5.symbol_info_tick 中价）
+- **预测箭头** forecast_arrow 类型：黑色细 arrow
+
+**新 smc_detector.py**（tt_modules/）:
+- `find_fvgs()` `find_obs()` `find_swing_liquidity()` 三个核心算法（基于 monitor_pois.py 逆向增强）
+- `detect_all(df)` 一键找全部
+- `to_render_annotations(detection)` 转 render_chart_image 兼容格式
+
+**render_chart_image(auto_detect_smc=True)** 默认开：用户问「画 X 帮我找 OB」自动调算法识别。
+
+**user_style_manual.md**（KK:wecom-bridge/）:
+- 详细记录用户样图的色板/字号/标注规范
+- design_infographic 自动 prepend 到 system prompt
+
+**smoke test 通过**：XAU H4 auto 识别 9 个 SMC 结构；BTC H1 8 个。两张图已 push 到企微。
+
+**修改文件**：
+- `kk:C:/Tools/wecom-bridge/wecom_bridge.py` (render_chart_image 重写)
+- `kk:C:/Tools/wecom-bridge/tt_modules/smc_detector.py` (新增)
+- `kk:C:/Tools/wecom-bridge/user_style_manual.md` (新增)
+- `kk:C:/Tools/wecom-bridge/user_style_refs/` (5 张样图沉淀)
+
+### 5.5.3 图文资料生成（2026-05-04，bridge v8）
+
+bridge 加 2 个图文生成工具 + send_image。
+
+| 工具 | 关键词触发 | 流水线 |
+|---|---|---|
+| **render_chart_image** | 画图 / 画一下 / 看图 / 标注 / 形态分析图 | mt5（Star Bridge）→ matplotlib + mplfinance（暗色 nightclouds）→ PNG → wecom send_image |
+| **design_infographic** | 教学 / 学习 / 概念 / 图解 / 卡片 / 知识图 / 做一张 / 设计一张 / 海报 / 长图 / 信息图 / 图文 / 日报 / 周报 / 复盘报告 | DeepSeek 生成 HTML（Tailwind CDN + 暗色金紫渐变）→ playwright headless chromium → PNG → wecom send_image |
+
+**设计规范**（hardcoded 进 `_ds_generate_html` 系统提示）：
+- 1080×1080 viewport，PingFang SC / 微软雅黑 / 思源黑体 中文字体
+- 暗黑底（#0f0f1e/#161626）+ 鲜亮强调色（#fbbf24金 / #34d399绿 / #60a5fa蓝 / #f472b6粉 / #a78bfa紫）
+- Tailwind 卡片 + grid + emoji + 渐变 + 数据可视化
+- 风格参考：Linear / Stripe / Vercel / Apple Keynote 海报
+
+**关键设计决策**：
+- **forced tool_choice**：bridge 端检测用户消息含 `DESIGN_KEYWORDS`/`CHART_KEYWORDS` 时，第一回合 tool_choice 强制为对应 function。后续回合 tool_choice='auto' 让 DeepSeek 总结。
+- **HTML auto-fallback**：DeepSeek 调 design_infographic 时如果 args.html_content 缺失（实测 DeepSeek 倾向输出空 args），bridge 调 `_ds_generate_html(topic)` 用专门的 system prompt 强制生成纯 HTML（无 markdown fence），再渲染。
+- **playwright 缓存依赖**：`device_scale_factor=2` 输出 retina；`wait_for_load_state('networkidle', 15s)` 确保 Tailwind CDN 加载完。
+
+**bridge venv 装包**：matplotlib mplfinance pillow playwright + chromium binary。
+
 ### 5.6 schtasks 服务化（KK 重启自动恢复关键）
 
 3 个核心服务用 schtasks ONCE + RunNow 起，PowerShell SSH session 断开不影响子进程：
